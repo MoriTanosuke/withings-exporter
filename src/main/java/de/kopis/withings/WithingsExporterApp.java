@@ -124,7 +124,7 @@ public class WithingsExporterApp {
         OAuthRequest request = new OAuthRequest(Verb.GET, "http://wbsapi.withings.net/v2" + "/measure");
         request.addQuerystringParameter("action", "getactivity");
         //request.addQuerystringParameter("date", FORMAT.format(new Date()));
-        request.addQuerystringParameter("date", "2014-08-17");
+        //request.addQuerystringParameter("date", "2014-08-17");
         request.addQuerystringParameter("userid", userid);
         service.signRequest(accessToken, request);
         Response response = request.send(new RequestTuner() {
@@ -157,4 +157,3 @@ public class WithingsExporterApp {
         server.start();
     }
 }
-
