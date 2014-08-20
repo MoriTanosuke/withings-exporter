@@ -8,18 +8,18 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.scribe.builder.ServiceBuilder;
 import org.scribe.model.*;
-import org.scribe.oauth.OAuth10aServiceImpl;
 import org.scribe.oauth.OAuthService;
 
 import java.io.StringReader;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Date;
+import java.util.Calendar;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
 public class WithingsExporterApp {
 
+    public static final String WITHINGS_API_BASEURL = "http://wbsapi.withings.net/v2";
     /**
      * API key to access Withings data.
      */
@@ -66,9 +66,8 @@ public class WithingsExporterApp {
         try {
             startJetty(jettyPort);
 
-            // TODO how to avoid cast to class? need to use RequestTuner later!
             service = new ServiceBuilder()
-                    .debug().debugStream(System.out)
+                    //.debug().debugStream(System.out)
                     .provider(WithingsApi.class)
                     .apiKey(YOUR_API_KEY)
                     .apiSecret(YOUR_API_SECRET)
@@ -94,6 +93,7 @@ public class WithingsExporterApp {
                     Thread.sleep(500);
                 } else {
                     // data is available now, get it and save it as properties for later use
+                    System.out.println();
                     final String data = response.getContentAsString();
                     httpClient.stop();
                     props.load(new StringReader(data));
@@ -103,7 +103,6 @@ public class WithingsExporterApp {
             System.out.println("Callback received, continuing.");
 
             final String verify = props.getProperty("oauth_verifier");
-            System.out.println("Verifier: " + verify);
             Verifier verifier = new Verifier(verify);
             accessToken = service.getAccessToken(requestToken, verifier);
 
@@ -117,28 +116,67 @@ public class WithingsExporterApp {
         }
 
         final String userid = props.getProperty("userid");
-        System.out.println("User ID: " + userid);
 
-        final SimpleDateFormat FORMAT = new SimpleDateFormat("yyyy-MM-dd");
+        int range = -30;
+        final String startdate = getDateFromRange(range);
+        final String today = getDateFromRange(0);
 
-        OAuthRequest request = new OAuthRequest(Verb.GET, "http://wbsapi.withings.net/v2" + "/measure");
-        request.addQuerystringParameter("action", "getactivity");
-        //request.addQuerystringParameter("date", FORMAT.format(new Date()));
-        //request.addQuerystringParameter("date", "2014-08-17");
-        request.addQuerystringParameter("userid", userid);
-        service.signRequest(accessToken, request);
-        Response response = request.send(new RequestTuner() {
-            @Override
-            public void tune(Request request) {
-                System.out.println("URL: " + request.getCompleteUrl());
-            }
-        });
-        Map data = new Gson().fromJson(response.getBody(), Map.class);
-        //System.out.println(data.get("body"));
-        Map body = (Map) data.get("body");
+        // query activities in the given range
+        final Map response = queryApi(service, accessToken, "/measure", "getactivity", userid, startdate, today);
+
+        // convert from JSON into a simple Map for easy parsing
         // print out a temporary CSV
-        System.out.println("Steps,Calories,Elevation");
-        System.out.println(body.get("steps") + "," + body.get("calories") + "," + body.get("elevation"));
+        System.out.println("Date,Steps,Calories,Elevation");
+        for (Map body : (List<Map>) response.get("activities")) {
+            System.out.println(body.get("date") + "," + body.get("steps") + "," + body.get("calories") + "," + body.get("elevation"));
+        }
+
+        // check if jetty is still running
+        if (server != null && server.isRunning()) {
+            System.out.println("Trying to shut down local webserver. Use CTRL+C if nothing happens...");
+            try {
+                server.join();
+                server.stop();
+            } catch (Exception e) {
+                // ignore this, we're going to shut down anyway
+            }
+        }
+    }
+
+    /**
+     * Send a request to the Withings API and return the response as a {@link String}.
+     *
+     * @param service     OAuth service to use
+     * @param accessToken a valid OAuth access token
+     * @param method      API method to call
+     * @param action      API action parameter to use when calling the API method
+     * @param userid      user ID to use for the request
+     * @param startdate   start of the date range
+     * @param enddate     end of the date range
+     * @return
+     */
+    private Map queryApi(OAuthService service, Token accessToken, String method, String action, String userid, String startdate, String enddate) {
+        OAuthRequest request = new OAuthRequest(Verb.GET, WITHINGS_API_BASEURL + method);
+        // get activities first
+        request.addQuerystringParameter("action", action);
+        // always provide the userid with the request
+        request.addQuerystringParameter("userid", userid);
+        // add the date range to request
+        request.addQuerystringParameter("startdateymd", startdate);
+        request.addQuerystringParameter("enddateymd", enddate);
+        // sign the request to make it valid
+        service.signRequest(accessToken, request);
+        // fetch response
+        Response response = request.send();
+        // return JSON object "body" only
+        return (Map) new Gson().fromJson(response.getBody(), Map.class).get("body");
+    }
+
+    private String getDateFromRange(int range) {
+        final SimpleDateFormat FORMAT = new SimpleDateFormat("yyyy-MM-dd");
+        final Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_YEAR, range);
+        return FORMAT.format(cal.getTime());
     }
 
     private void stopJetty() throws Exception {
@@ -147,6 +185,7 @@ public class WithingsExporterApp {
 
     private void startJetty(int port) throws Exception {
         server = new Server(port);
+        server.setStopAtShutdown(true);
 
         ServletHandler handler = new ServletHandler();
         server.setHandler(handler);
