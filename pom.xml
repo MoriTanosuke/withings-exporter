@@ -23,6 +23,11 @@
             <artifactId>gson</artifactId>
             <version>2.3</version>
         </dependency>
+        <dependency>
+            <groupId>net.sf.jopt-simple</groupId>
+            <artifactId>jopt-simple</artifactId>
+            <version>4.7</version>
+        </dependency>
         <!-- used to start a webserver to get Withings callbacks -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
